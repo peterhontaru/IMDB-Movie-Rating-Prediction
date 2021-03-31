@@ -8,8 +8,8 @@
     
       code_folding: hide
       
-    title: "Statistical Inference with the GSS data"
-    subtitle: "Indepth hypothesis and confidence interval testing"
+    title: "IMDB rating prediction"
+    subtitle: "Variable importance and prediction"
     author: "by Peter Hontaru"
 ---
 
@@ -19,34 +19,46 @@
 
 ### Problem Statement:
 
-This document is a report from the final course project for the **Inferential Statistics course**, as part of the **Duke University Statistics with R course in partnership with Coursera**. 
+This document is a report from the final course project for the **Linear regression course**, as part of the **Duke University Statistics with R course in partnership with Coursera**. 
 
-The project consisted of exploring a real-world dataset (a subset of the **General Social Survey**) in order to create a report that included statistical inference on a question of interest (ended up using three questions).
+This project is based on a fictitious scenario where I’ve been hired as a data scientist at Paramount  Pictures. The data presents numerous variables on movies such as audience/critic ratings, number of votes, runtime, genre, etc. Paramount Pictures is looking to gather insights into determining the acclaim of a film and other novel patterns or ideas.
 
-### Summary:
+### Summary
 
-* Although small, there were significant differences between **genders** on whether **sexual education should be taught in schools**. This is especially important for single parents, or parents of the same sex, where one's stance and actions cannot overcompensate for the other's
-* We could not prove significant differences in the representation of each **gender** amongst the various **social classes**
-* There were significant differences in **total family income** based on the **respondent's family income when 16 years old**. This is important as the earned income should be independent of someone's family background. Further measures should be put into place for helping out those in unfavourable groups
-
-*Note: all of the research questions are focusing on the survey data in the year 2012 to account for year-on-year variances and display the most recent view that our data could provide.*
+- our linear model was only able to capture 29% of the variability in our data
+- the model significantly over-predicts for low IMDB ratings and over-predicts for high IMDB ratings
+- while we were able to identify significant predictors, the design of the study does not allow for causation
+- critics and audiences tend to differ in their movie taste, particularly in categories such as Comedy and Action & Adventure
+- some accolades are better predictors of IMDB ratings than others
+- Friday might be the best day to release a movie in terms of audience access, but the movies are not the most popular (as judged by total IMDB votes or IMDB rating)
+- there is an exponential relationship between the number of votes a movie receives and the IMDB rating, where highly rated movies are much more popular than normally expected
+- further optimisation can be made if we have a specific goal to make a movie for either critics or audience
+  - similarly, popularity could also be determined by total number of votes (quantity) rather than rating (quality)
 
 ### Next steps/recommendations:
 
-* analyse changes between years (ie. 1980 vs 2012)
-* some variables (ie. social class) were subjective and registered based on the respondent's opinion (more objective methods should be considered)
-* further expand on the analysis by looking at other related factors (ie. if there was a difference between total family income based on the respondent's family income when 16 years old, can we find any further variables that can provide a more in-depth view as to why?)
+- relatively low sample sizes before 1990; our data is not representative of each year included in the dataset(but it is representative overall)
+- we could use more data on factors we would normally have access before the release of the film: budget, actor/director social media influence (which might affect ratings or popularity), etc
+- other types of models could be explored, particularly exponential ones
+- some techniques were specifically used in the context of the course - more robust methods are available such as:
+  - R adjustment, as it is known to be more reliable than an arbitrary p value selection
+  - train/test split of our dataset
+  - automated backward/forward model selection (ie. through Caret), since a manual approach is susceptible to human error
+  - no data pre-processing
 
 ### Dataset
 
-Since 1972, the General Social Survey (GSS) has been monitoring societal change and studying the growing complexity of American society. The GSS aims to gather data on contemporary American society in order to monitor and explain trends and constants in attitudes, behaviors, and attributes; to examine the structure and functioning of society in general as well as the role played by relevant subgroups; to compare the United States to other societies in order to place American society in comparative perspective and develop cross-national models of human society; and to make high-quality data easily accessible to scholars, students, policy makers, and others, with minimal cost and waiting.
+The data set is comprised of 651 randomly sampled movies produced and released before 2016.
 
-Source: GSS project description - https://www.norc.org/Research/Projects/Pages/general-social-survey.aspx
+Source: 
+
+- Rotten Tomatoes: https://www.rottentomatoes.com/
+- IMDB API: https://www.imdb.com/
 
 ## Extended analysis
 
 Full project available:
 
-* at the following [link](http://htmlpreview.github.io/?https://github.com/peterhontaru/Statistical-Inference-General-Social-Survey/blob/main/Statistical-Inference.html), in HTML format
-* in the **Statistical-Inference.md** file of this repo (however, I recommend previewing it at the link above since it was originally designed as a html document)
-* http://htmlpreview.github.io/?https://github.com/peterhontaru/Statistical-Inference-General-Social-Survey/blob/main/Statistical-Inference.html
+* at the following [link](http://htmlpreview.github.io/?https://github.com/peterhontaru/IMDB-Movie-Rating-Prediction/blob/main/Movie-rating.html), in HTML format
+* in the **Movie rating.md** file of this repo (however, I recommend previewing it at the link above since it was originally designed as a html document)
+* http://htmlpreview.github.io/?https://github.com/peterhontaru/IMDB-Movie-Rating-Prediction/blob/main/Movie-rating.html

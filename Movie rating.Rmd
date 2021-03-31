@@ -18,8 +18,8 @@
         
         keep_md: true
         
-    title: "Modeling and prediction for movies"
-    subtitle: "TBC"
+    title: "IMDB rating prediction"
+    subtitle: "Variable importance and prediction"
     author: "by Peter Hontaru"
 ---
 
@@ -51,6 +51,7 @@ knitr::opts_chunk$set(
     tidy = FALSE, # cleaner code printing
     size = "small", # smaller code
     
+    fig.path = "figures/", #graphics location
     out.width = "100%",
 
     message = FALSE,
