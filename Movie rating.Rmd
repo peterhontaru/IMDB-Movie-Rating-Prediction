@@ -1,0 +1,716 @@
+---
+  output:
+    html_document:
+        toc: true
+        toc_float: false
+        toc_depth: 4
+        number_sections: false
+  
+        code_folding: hide
+        code_download: true
+  
+        fig_width: 9
+        fig_height: 4
+        fig_align: "center"
+        
+        highlight: pygments
+        theme: cerulean
+        
+        keep_md: true
+        
+    title: "Modeling and prediction for movies"
+    subtitle: "TBC"
+    author: "by Peter Hontaru"
+---
+
+## Background
+
+**What are the most important factors in determining the IMDB rating of a movie and can we use a multiple linear regression model to predict this rating?**
+
+This project is based on a fictitious scenario where I’ve been hired as a data scientist at Paramount  Pictures. The data presents numerous variables on movies such as audience/critic ratings, number of votes, runtime, genre, etc. Paramount Pictures is looking to gather insights into determining the acclaim of a film and other novel patterns or ideas. The data set is comprised of 651 randomly sampled movies produced and released before 2016.
+
+```{r load-packages, message=FALSE, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(ggmosaic)
+library(ggcorrplot)
+library(ggthemes)
+library(broom)
+library(plotly)
+library(statsr)
+library(tidyverse)
+library(kableExtra)
+library(ggpubr)
+library(lubridate)
+library(car)
+library(broom)
+library(quantreg)
+
+knitr::opts_chunk$set(
+    echo = TRUE, # show all code
+    tidy = FALSE, # cleaner code printing
+    size = "small", # smaller code
+    
+    out.width = "100%",
+
+    message = FALSE,
+    warning = FALSE
+    )
+
+load("movies.Rdata")
+
+#remove some columns that are not needed 
+movies <- movies%>%
+  select(-imdb_url, -rt_url, -director:-actor5)
+```
+
+* * *
+
+## Part 1: Data
+
+### generabizability
+
+The dataset is comprised of 651 randomly sampled movies produced and released before 2016. Therefore,due to the random sampling, it can be assumed that the data is representative of all movies produced. 
+
+However, as seen below, the earliest date included is 1970 and some years do not have a significant amount of data. Thus, the data is not representative of each year within our sample and this should be considered when interpreting the results. We should also ensure to not extrapolate outside of this year range when calculating predictions.
+
+```{r}
+movies%>%
+  group_by(thtr_rel_year)%>%
+  summarise(count = n())%>%
+  
+  ggplot(aes(thtr_rel_year, count))+
+  geom_col(col="black", fill = "dark red", width = 1)+
+  geom_text(aes(label = count), nudge_y = 3, size = 3)+
+  theme_few()+
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())+
+  labs(x = NULL,
+       y = NULL,
+       title = "Number of movies included within each year")
+```
+
+### causality 
+
+Due to the observational nature of the study, no random assignment was used (test/control group), and hence causality cannot be inferred.
+
+* * *
+
+## Part 2: Research question
+
+**What are the most important factors in determining the IMDB rating of a movie and can we use a multiple linear regression model to predict this rating?**
+
+The ability to predict ratings based on film metrics could help:
+
+- understand the popularity of a movie before the full ratings are generated
+- inform us if a movie is performing better or worse than expected
+- provide insight into which areas to focus for the most desirable outcome
+
+* * *
+
+## Part 3: Exploratory data analysis (EDA)
+
+### Collinearity and Parsimony
+
+We can observe high correlations between our various ratings (IMDB rating, audience score and critics score). We should consider only keeping one of our variables for our final model, but we will explore all of them throughout our EDA.
+
+There's also a high correlation between theatre release year and DVD release year so we should only choose to include one. With the current trend of online streaming (ie. Netflix, Hulu, Amazon), physical DVDs are not as relevant and we can choose to exclude the DVD variables in favour of the theatre ones.
+
+```{r fig.height=5, fig.width=10}
+#select all to start
+raw_data_corr <- select_if(movies, is.numeric)  
+
+# Compute a correlation matrix
+corr <- round(cor(raw_data_corr, use="complete.obs"),2)
+
+# Compute a matrix of correlation p-values
+p.mat <- cor_pmat(raw_data_corr)
+
+# Visualize the correlation matrix
+ggcorrplot(corr, method = "square", 
+           ggtheme = ggthemes::theme_few, 
+           #title = "We can observe some clear patterns",
+           
+           outline.col = "black",
+           colors = c("blue","white", "red"),
+           
+           lab = TRUE,
+           lab_size = 2.5,
+           digits = 2,
+           
+           type = "lower",
+           legend = "",
+           tl.cex = 8,
+           #show insignificant ones as blank
+           p.mat = p.mat,
+           hc.order = TRUE,
+           insig = "blank")
+
+movies <- movies%>%
+  select(-dvd_rel_year, -dvd_rel_month, -dvd_rel_day)
+```
+
+### Which types of film are included in our analysis?
+
+We can see that the majority of the movies were within the Feature Film category. Given that Paramount operates in this area (rather than documentaries or TV shows), we will also focus our analysis/model on this category.
+
+```{r}
+movies%>%
+  group_by(title_type)%>%
+  summarise(count = n())%>%
+  mutate(prop = round(count/sum(count)*100,0))%>%
+  
+  ggplot(aes(title_type, prop))+
+  geom_col(col="black", fill = "dark red")+
+  geom_text(aes(label = paste(count, " - (", prop, "%)", sep = "")), nudge_y = 5, size = 5)+
+  theme_few()+
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())+
+  labs(x = NULL,
+       y = NULL)
+
+movies <- movies%>%
+  filter(title_type == "Feature Film")%>%
+  select(-title_type)
+```
+
+### Which genres are included in our analysis?
+
+The majority of our data contains Drama movies(51%), followed by Comedy(14%) and Action and Adventure(11%). We can see that we still have a few documentaries left, even though we removed them based on type. We will also remove this subset for the same reason as before.
+
+```{r}
+movie_genre <- movies%>%
+  group_by(genre)%>%
+  summarise(count = n())%>%
+  mutate(proportion = round(count/sum(count)*100,1))%>%
+  arrange(desc(count))
+  
+  movie_genre%>%
+  kbl(caption = "Summary of movie genres")%>%
+  kable_paper("hover", full_width = F)
+  
+  movies <- movies%>%
+    filter(genre != "Documentary")
+```
+
+### Are the IMDB ratings impacted by the genre?
+
+We can observe significant differences between the various genres and metrics such as variance, medians, range and outliers.
+
+```{r}
+  ggplot(movies, aes(genre, imdb_rating, col = genre))+
+  geom_boxplot(show.legend = FALSE)+
+  geom_jitter(alpha = 0.1, show.legend = FALSE)+
+  coord_flip()+
+  labs(y = "IMDB rating")+
+  theme_few()+
+  labs(x=NULL)
+```
+
+### Is there an association between the IMDB rating and the total amount of IMDB votes?
+
+The high-performing movies (as measured by IMDB rating) also have a higher number of votes. This trend seems exponential towards the higher IMDB ratings/votes, where the increase in total number of votes is much higher than in the low/medium ranges.
+
+```{r}
+movies%>%
+  ggplot(aes(imdb_rating, imdb_num_votes))+
+  geom_jitter(width=0.1, height = 0.1, alpha = 0.5)+
+  geom_smooth(se = FALSE)+
+  theme_few()+
+  labs(x = "IMDB rating",
+       y = "Total IMDB votes")+
+  theme(legend.position = "none")
+```
+
+### Do movie critics and audiences share the same taste in movies?
+
+Judging by the variances in our scatter plots, we can observe fairly large discrepancies between how audiences and critics perceive movies. This is even more apparent in genres such as Action & Adventure and Comedy, where audiences tend to give much higher ratings than the critics.
+
+```{r}
+movies%>%
+  ggplot(aes(audience_score, critics_score, col = genre))+
+  geom_jitter(width=0.1, height = 0.1, show.legend = FALSE)+
+  facet_wrap(.~genre)+
+  theme_few()+
+  annotate("segment", x=-Inf, xend=Inf, y=-Inf, yend=Inf, alpha = 0.5, lty = 2)+
+  theme(legend.position = "none")+
+  labs(x = "Audience score",
+       y = "Critics score")
+```
+
+We can focus more on these differences by looking in average scores for each genre. Below, we can observe very large differences between the various genres.
+
+```{r}
+movies %>%
+  select(genre, audience_score, critics_score)%>%
+  group_by(genre)%>%
+  summarise(audience_score = mean(audience_score),
+            critics_score = mean(critics_score))%>%
+  mutate(difference_score = round((audience_score - critics_score), 1),
+         status = ifelse(abs(difference_score) <=3, "good (lower than 3)", 
+                         ifelse(abs(difference_score) <=5, "ok (between 3 and 5)", "bad (higher than 5)")))%>%
+#create plot        
+  ggplot(aes(reorder(genre, difference_score), difference_score, fill = status))+
+  geom_col(col = "black")+
+  scale_fill_manual(values = c("dark red", "#009E73", "gold3"))+
+  scale_colour_manual(values = c("dark red", "#009E73", "gold3"))+
+  geom_label(aes(genre, difference_score + ifelse(difference_score >= 0, +0.2, -0.2), label = difference_score), show.legend = FALSE, size = 3, fill = "white")+
+  labs(x=NULL,
+       y="Points disagreement",
+       title = "Rating disagreement between critics and audiences",
+       subtitle = "A positive score means the audience rated higher than critics",
+       fill = "Status")+
+  theme(legend.position = "top",
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank())+
+  coord_flip()+
+  theme_few()
+```
+
+### Is there an association between the year a movie was released in and the IMDB rating?
+
+Given that we have the number of votes for each IMDB rating, we will use a weighted mean for this comparison.
+
+While the total number of votes increased, as shown by the size of the points, we can see that the overall rating was fairly consistent. Again, to note the relatively low sample size of movies released before ~1990.
+
+```{r}
+movies%>%
+  group_by(thtr_rel_year)%>%
+  summarise(imdb_wmean = weighted.mean(imdb_rating, imdb_num_votes),
+            count = n(),
+            votes = sum(imdb_num_votes))%>%
+
+ggplot(aes(thtr_rel_year, imdb_wmean))+
+  geom_point(aes(size = votes), show.legend = FALSE)+
+  geom_line()+
+  coord_cartesian(ylim = c(0,10))+
+  labs(x = NULL,
+       y = "IMDB rating",
+       subtitle = "Size of point shows the relative sample of number of votes within each year")+
+  theme_few()
+```
+
+### Are there any associations between the IMDB rating and the month of release?
+
+It seems that the release dates are fairly equal distributed across the year (width of the bar) as well as equal in variance. Thus, we can say that it looks like these factors are independent of each other.
+
+```{r}
+movies%>%
+  mutate(thtr_rel_month = as.factor(thtr_rel_month))%>%
+  
+ggplot(aes(thtr_rel_month, imdb_rating, col = thtr_rel_month))+
+  geom_boxplot(aes(group = thtr_rel_month), varwidth = TRUE, show.legend = FALSE)+
+  geom_jitter(alpha = 0.1, show.legend = FALSE)+
+  labs(x = "Month",
+       y = "IMDB rating")+
+  theme_few()
+```
+
+### Is there an association between the day of the week a movie was released and the IMDB rating?
+
+Both the boxplot and table below show that almost 75% of movie releases happen on a Friday and 11% on a Wednesday. An squal split of around 2-3% each happen on the other days. While the sample sizes are different across the various weekdays, there doesn't seem to be a clear trend regarding the IMDB rating. Both audiences and critics tend to agree that movies released on Monday, Tuesday and Friday perform worse than the rest.
+
+```{r}
+day_of_week <- movies%>%
+  mutate(date = make_date(thtr_rel_year, thtr_rel_month, thtr_rel_day),
+         wday = weekdays.Date(date),
+         wday_num = wday(date, week_start = 1))%>%
+  group_by(wday, wday_num)%>%
+  summarise(count = n(),
+            votes = round(mean(imdb_num_votes)),
+            imdb_wmean = weighted.mean(imdb_rating, imdb_num_votes),
+            audience_score = round(mean(audience_score),1),
+            critics_score = round(mean(critics_score),1),
+            imdb_wmean = round(imdb_wmean, 1))%>%
+  ungroup()%>%
+  mutate(prop = round(count/sum(count)*100,1))%>%
+  arrange(wday_num)
+
+#add the weekday column to our model
+movies <- movies%>%
+  mutate(date = make_date(thtr_rel_year, thtr_rel_month, thtr_rel_day),
+         wday = as.factor(weekdays.Date(date)),
+         wday_num = wday(date, week_start = 1))%>%
+  select(-date)
+
+ggplot(movies, aes(reorder(wday,wday_num), imdb_rating, col = wday))+
+  geom_boxplot(show.legend = FALSE, varwidth = TRUE)+
+  geom_jitter(alpha = 0.1, show.legend = FALSE)+
+  labs(x = NULL,
+       y = "IMDB rating")+
+  theme_few()
+  
+  day_of_week%>%
+  kbl(caption = "Proportion of releases by day of week")%>%
+  kable_paper("hover", full_width = F)
+```
+
+### Does the runtime of the movie affect the IMDB rating?
+
+We can see a slight trend where movies of a longer length correlate with a higher IMDB rating. However, this is not causal and it could be that this is an indirect effect of the genre of the movie (and thus, longer movies are of a favourable genre).
+
+```{r}
+ggplot(movies, aes(runtime, imdb_rating))+
+  geom_jitter(width = 0.1, height = 0.1, alpha = 0.75)+
+  geom_smooth(se=FALSE)+
+  theme_few()+
+  labs(x = "Runtime (min)",
+       y = "IMDB rating")
+```
+
+### Where does Paramount Pictures rank amogst the various other studios?
+
+Based on movie averages, Paramount Pictures is ranked somewhere at the top, based on the IMDB rating/number of total votes and just above average regarding audience ratings.
+
+```{r}
+studios <- movies%>%
+  group_by(studio)%>%
+  summarise(imdb_wmean = weighted.mean(imdb_rating, imdb_num_votes),
+            audience_score = mean(audience_score, na.rm = TRUE),
+            count = n(),
+            avg_votes = sum(imdb_num_votes)/count)
+
+paramount_studio <- studios%>%
+  filter(studio == "Paramount Pictures")
+
+ggplot()+
+  geom_point(data = studios, aes(audience_score, imdb_wmean, size = avg_votes), show.legend = FALSE, alpha = 0.6)+
+  geom_text(data = paramount_studio, aes(audience_score, imdb_wmean, label = "Paramount"), col = "red", size = 5, nudge_y = 0.3)+
+  geom_point(data = paramount_studio, aes(audience_score, imdb_wmean), col = "red", size = 3.7)+
+  labs(x = "Audience score",
+       y = "IMDB rating",
+       subtitle = "Size of point shows the relative sample of number of votes within each year (average per studio)")+
+  theme_few()
+```
+
+### Is there an association between the type of an award a movie receives and the rating?
+
+We can notice significant differences for the bottom three awards, but not nothing significant between those that received the top 3 awards in the below boxplot.
+
+```{r}
+awards <- movies%>%
+  select(audience_score, critics_score, imdb_rating, imdb_num_votes, best_pic_nom:top200_box)%>%
+  gather(Award, Status, -audience_score, -critics_score, -imdb_rating, -imdb_num_votes)
+
+ggplot(awards, aes(Status, imdb_rating, col = Status))+
+  geom_boxplot()+
+  theme_few()+
+  labs(col = "Award received",
+       x = NULL,
+       y = "IMDB rating")+
+  facet_wrap(.~Award)+
+  theme(legend.position = "top")
+```
+
+The same trend can be seen below where movies that have received the bottom 3 awards tend to perform better than those who have not on either movie rating score.
+
+```{r}
+  award_yes <- awards%>%
+  filter(Status == "yes")
+
+  ggplot(awards, aes(critics_score, imdb_rating, col = Status))+
+  geom_point(alpha = 0.50)+
+  geom_point(data = award_yes, aes(critics_score, imdb_rating), col = "dark red")+
+  theme_few()+
+  scale_colour_manual(values = c("gold3", "dark red"))+
+  labs(col = "Award received",
+       x = "Critics score",
+       y = "IMDB rating")+
+  facet_wrap(.~Award)+
+  theme(legend.position = "top")
+```
+
+We can also spot a trend where, generally speaking, the rarer the award, the higher the chance it would impact any of the ratings in a favourable way.
+
+```{r}
+awards_table <- awards%>%
+    group_by(Award, Status)%>%
+    summarise(count = n(),
+              audience_score = round(mean(audience_score),1),
+              critics_score = round(mean(critics_score),1),
+              imdb_rating = round(weighted.mean(imdb_rating, imdb_num_votes),1),
+              imdb_num_votes = round(mean(imdb_num_votes),0))%>%
+  mutate(proportion = round(count/sum(count)*100,1))%>%
+  arrange(proportion)
+
+awards_table%>%
+  kbl(caption = "Summary of awards and movie ratings")%>%
+  kable_paper("hover", full_width = F)
+```
+
+* * *
+
+## Part 4: Modeling
+
+### Feature selection
+
+We will be excluding the following variables from our **full model**:
+
+- title, studio as they might cause our model to overfit
+- critics/audience ratings and scores as they are highly correlated with our predicted variables (IMDB rating)
+- number of IMDB ratings as it would act as a proxy for the IMDB rating (they're also correlated)
+- DVD release year, month and day for reasons mention before (high correlation with theatre release dates and lack of importance given current streaming trends)
+
+**Feature engineering**: we also added day of the week to see if there are any trends
+
+### Selection method
+
+We chose a backward p value adjustment to our model, given the context of the study where we could not use an automated way to reduce variables. An R adjustment would be incredibly time-consuming given the manual methodology and prone to human error. Furthermore, a p value adjustment would ensure that the factors included are significant (which is not necessarily true in an R adjustment).
+
+```{r}
+model_initial <- lm(imdb_rating ~ genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_month + thtr_rel_day + best_pic_nom + best_pic_win + best_actor_win + best_actress_win + best_dir_win + top200_box + wday, data=movies)
+
+tidy(model_initial)%>%
+  arrange(term, p.value)%>%
+  kbl(caption = "Initial model - summary")%>%
+  kable_paper("hover", full_width = F)
+
+# removed best_actor_win
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_month + thtr_rel_day + best_pic_nom + best_pic_win + best_actress_win + best_dir_win + top200_box + wday, data=movies)
+
+# removed best_actress_win
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_month + thtr_rel_day + best_pic_nom + best_pic_win + best_dir_win + top200_box + wday, data=movies)
+
+# removed thtr_rel_day
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + thtr_rel_year + thtr_rel_month + best_pic_nom + best_pic_win + best_dir_win + top200_box + wday, data=movies)
+
+# removed thtr_rel_month
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + thtr_rel_year + best_pic_nom + best_pic_win + best_dir_win + top200_box + wday, data=movies)
+
+# removed thtr_rel_year
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + best_pic_nom + best_pic_win + best_dir_win + top200_box + wday, data=movies)
+
+# removed best_pic_win
+model_final <- lm(imdb_rating ~ genre + runtime + mpaa_rating + best_pic_nom + best_dir_win + top200_box + wday, data=movies)
+```
+
+### Final model
+
+**Reason for excluding certain variables**: following a backward model adjustment, the following variables were not proven to be significant and were excluded from the final model (in order of exclusion):
+
+- best_actor_win
+- best_actress_win
+- thtr_rel_day
+- thtr_rel_month
+- thtr_rel_year
+- best_pic_win
+
+That leaves us with the following variables included in our **final model**:
+
+- genre
+- runtime
+- mpaa_rating 
+- best_pic_nom 
+- best_dir_win 
+- top200_box
+- weekday
+
+### Interpretation of our prediction model
+
+Overall, we can see that the model was able to capture 26% of the variability in our data.
+
+```{r}
+glance(model_final)%>%
+  kbl(caption = "Final model - overall summary")%>%
+  kable_paper("hover", full_width = F)
+```
+
+At the coefficient level, we can see that all our included predictors were significant. The most significant predictor was runtime. This was followed by whether a movie was nominated for Best Picture as well as whether it belonged to the "Drama" genre.
+
+We can conclude that with everything else held constant: 
+
+* for each minute of additional **runtime**, it is expected that the IMDB rating increases by 0.012 points
+* a movie nominated for the **Best Picture** award is estimated to have a higher rating, on average, by 0.84 points
+* a movie that won the **Best Director** award is predicted to have a higher rating, on average, by 0.30 points
+* movies included in the **top 200 box** are estimated to be rated higher by 0.53 points
+* a movie within the Drama **genre** is expected to score 0.57 points higher than an Action and Adventure movie (the intercept). Three other genres can also be estimated to have a significantly higher rating than the intercept, based on their coefficient and p-value:
+  * Musical & Performing Arts
+  * Mystery & Suspsense
+  * Other
+* movies with an **mpaa rating** of PG and PG-13 are estimated to score lower than G rated movies by 0.59 and 0.80, respectively
+* **day of week** was also significant. A movie released on a Saturday was predicted to score higher than the intercept (Friday) by 0.42 points
+
+```{r}
+tidy(model_final)%>%
+  arrange(term, p.value)%>%
+  kbl(caption = "Final model - summary")%>%
+  kable_paper("hover", full_width = F)
+```
+
+To note, however, that while our model performs well in the middle regions, it significantly over-predicts for low IMDB ratings and under-predicts for high IMDB ratings.
+
+```{r}
+ggplot(model_final, aes(imdb_rating, .resid))+
+  geom_hline(yintercept = 0, alpha = 0.5, size = 3, color = "grey52")+
+  geom_jitter(alpha = 0.5, color = "blue", height = 0.1, width = 0.1)+
+  geom_smooth(method = "lm", lwd = 0.5, col = "red", se = FALSE)+
+  theme_few()+
+  labs(x = "IMDB rating",
+       y="Residuals")
+```
+
+### Model diagnostics
+
+#### 1. linear relationship between each (numerical) explanatory variable and response
+
+We only have one numerical variable (runtime) which is shown to have a linear relationship with our predictor variable (IMDB rating) by the random scatter in the below **residual plot**. However, to note that there weren't many movies with a runtime of over 150 minutes.
+
+```{r}
+ggplot(model_final, aes(runtime, .resid))+
+  geom_hline(yintercept = 0, alpha = 0.5, size = 3, color = "grey52")+
+  geom_point(alpha = 0.5, color = "blue")+
+  geom_smooth(method = "lm", lwd = 0.5, col = "red", se = FALSE)+
+  theme_few()+
+  labs(x = "Runtime",
+       y="Residuals")
+```
+
+#### 2. nearly normal residuals with mean 0
+
+Despite a slight skew to the left, the majority of our residuals within the below **residual histogram** are centered around the mean 0.
+
+```{r}
+ggplot(model_final, aes(.resid))+
+  #geom_histogram(binwidth = 0.1, col = "black", fill = "blue")+
+  geom_histogram(aes(y=..density..), color="black", fill="white", lwd = 0.75) +
+  geom_density(alpha=0.2, fill="#FF6666") +
+  geom_vline(aes(xintercept=mean(.resid)), col = 'red', lwd = 1, lty = 2) +
+  labs(x="Residuals",
+       y= "Density")+
+  theme_few()
+```
+
+Similarly, the **Normal probability plot of residuals (QQ plot)** below shows a similar trend. Outside of the tail areas, we do not see any significant deviations from the mean.
+
+```{r}
+
+ggplot(model_final, aes(sample=.resid))+
+  stat_qq()+
+  stat_qq_line()+
+  theme_few()+
+  theme(legend.position = "none")
+```
+
+#### 3. constant variability of residuals
+
+We can see that our residuals are equally variable for low and high values of the predicted response variable (IMDB rating).
+
+```{r}
+ggplot(model_final, aes(.fitted, .resid))+
+  geom_hline(yintercept = 0, alpha = 0.5, size = 3, color = "grey52")+
+  geom_point(alpha = 0.5, color = "blue")+
+  geom_smooth(method = "lm", lwd = 0.5, col = "red", se = FALSE)+
+  theme_few()+
+  labs(x = "IMDB rating prediction",
+       y="Residuals")
+```
+
+We can also plot the absolute values of the residuals as seen below. This can be thought of the above plot folded in half. Thus, a fan shape in the above plot would look as a triangle in the below plot. This is not the case here, and thus, this condition is also met.
+
+```{r}
+ggplot(model_final, aes(.fitted, abs(.resid)))+
+  geom_hline(yintercept = 0, alpha = 0.5, size = 3, color = "grey52")+
+  geom_point(alpha = 0.5, color = "blue")+
+  #geom_smooth(method = "lm", lwd = 0.5, col = "red", se = FALSE)+
+  theme_few()+
+  labs(x = "IMDB rating prediction",
+       y="Residuals")
+```
+
+#### 4. independence of residuals (and hence observations)
+
+No apparent trend which suggests independence from the order of data collection.
+
+```{r}
+df <- augment(model_final)
+
+  ggplot(data=df, aes(x = 1:nrow(df), y = .resid)) + 
+  labs(x = "Index", 
+       y = "Residuals")+
+  geom_hline(yintercept = 0, alpha = 0.5, size = 3, color = "grey52", lty = 2)+
+  geom_hline(yintercept=0, col="red", linetype="dashed")+
+  geom_point(alpha = 0.5, color = "blue")+
+  geom_smooth(method = "lm", lwd = 0.5, col = "red", se = FALSE)+
+  theme_few()
+```
+
+* * *
+
+## Part 5: Prediction
+
+### Prediction and interpretation
+
+Here are the details of the **La La Land** movie, a movie released in 2016.
+
+*Reference - IMDB, Oscars and Box Office Mojo official websites*.
+
+```{r}
+movie_lalaland <- data.frame("genre" = c("Musical & Performing Arts"), 
+                       "runtime" = c(128), 
+                       "best_dir_win" = "yes",
+                       "best_pic_nom" = "yes",
+                       "mpaa_rating" = "PG-13",
+                       "wday" = "Friday",
+                       "top200_box" = "yes")
+
+movie_lalaland%>%
+  kbl(caption = "Movie data")%>%
+  kable_paper("hover", full_width = F)
+```
+
+Given this data, the model predicted an IMDB rating of **8.58**. The lower and upper interval values tell us that the IMDB rating for La La Land is in the interval (7.65 and 9.50) with 95% probability.
+
+```{r}
+pred_lalaland <- predict(model_final, newdata = movie_lalaland, interval = "confidence")
+
+pred_lalaland%>%
+  kbl(caption = "Predictions")%>%
+  kable_paper("hover", full_width = F)
+```
+
+Lastly, we can plot this data to be able to visually interpret it. We can see that it was relatively close to the prediction and within the predicted interval.
+
+```{r}
+ggplot(movies, aes(imdb_rating, imdb_num_votes))+
+  geom_jitter(alpha = 0.5, size = 0.75, width = 0.1, height = 0.1)+
+  geom_smooth(se=FALSE)+
+  #plot prediction
+  geom_point(aes(x=8.576486 , y = 513225), size = 5, col = "blue")+
+  geom_text(aes(x=8.576486 , y = 513225), label = "Prediction", nudge_x = 0.25, nudge_y = -75000)+
+  #correct value
+  geom_point(aes(x=8.0, y = 513225), size = 5, col = "red")+
+  geom_text(aes(x=8.0, y = 513225), label = "Actual", nudge_y = -55000)+
+  #confidence interval
+  geom_errorbar(aes(xmax = 9.502354, xmin = 7.650619, x =8.576486, y=513225), width = 0.5)+
+  geom_text(aes(x=9.2, y = 513225), label = "(CI)", col = "black", nudge_y = 48000)+
+  theme_few()+
+  labs(x = "IMDB rating",
+       y = "IMDB number of votes")
+```
+
+* * *
+
+## Part 6: Conclusion
+
+### Summary
+
+- our linear model was only able to capture 29% of the variability in our data
+- the model significantly over-predicts for low IMDB ratings and over-predicts for high IMDB ratings
+- while we were able to identify significant predictors, the design of the study does not allow for causation
+- critics and audiences tend to differ in their movie taste, particularly in categories such as Comedy and Action & Adventure
+- some accolades are better predictors of IMDB ratings than others
+- Friday might be the best day to release a movie in terms of audience access, but the movies are not the most popular (as judged by total IMDB votes or IMDB rating)
+- there is an exponential relationship between the number of votes a movie receives and the IMDB rating, where highly rated movies are much more popular than normally expected
+- further optimisation can be made if we have a specific goal to make a movie for either critics or audience
+  - similarly, popularity could also be determined by total number of votes (quantity) rather than rating (quality)
+
+### Shortcomings/challenges
+
+- relatively low sample sizes before 1990; our data is not representative of each year included in the dataset(but it is representative overall)
+- we could use more data on factors we would normally have access before the release of the film: budget, actor/director social media influence (which might affect ratings or popularity), etc
+- other types of models could be explored, particularly exponential ones
+- some techniques were specifically used in the context of the course - more robust methods are available such as:
+  - R adjustment, as it is known to be more reliable than an arbitrary p value selection
+  - train/test split of our dataset
+  - automated backward/forward model selection (ie. through Caret), since a manual approach is susceptible to human error
+  - no data pre-processing
