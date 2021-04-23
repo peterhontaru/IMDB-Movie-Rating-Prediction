@@ -84,4 +84,3 @@ Full project available:
 -   in the **Movie rating.md** file of this repo (however, recommend
     previewing it at the link above since it was originally designed as
     a html document)
--   <http://htmlpreview.github.io/?https://github.com/peterhontaru/IMDB-Movie-Rating-Prediction/blob/main/Movie-rating.html>
