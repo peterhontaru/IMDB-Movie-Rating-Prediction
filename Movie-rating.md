@@ -5,14 +5,19 @@
         toc_float: false
         toc_depth: 4
         number_sections: false
+  
         code_folding: hide
         code_download: true
+  
         fig_width: 9
         fig_height: 4
         fig_align: "center"
+        
         highlight: pygments
         theme: cerulean
+        
         keep_md: true
+        
     title: "IMDB rating prediction"
     subtitle: "Variable importance and prediction"
     author: "by Peter Hontaru"
